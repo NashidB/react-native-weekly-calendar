@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Text, View, ScrollView, TouchableOpacity, TouchableWithoutFeedback, Modal, Platform, ActivityIndicator } from 'react-native';
+import { Text, View, ScrollView, TouchableOpacity, TouchableWithoutFeedback, Modal, Platform, ActivityIndicator, Dimensions } from 'react-native';
 import PropTypes from 'prop-types';
 import moment from 'moment/min/moment-with-locales';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -21,12 +21,12 @@ const WeeklyCalendar = props => {
     const [scheduleView, setScheduleView] = useState(undefined)
     const [dayViewOffsets, setDayViewOffsets] = useState(undefined)
     const scrollViewRef = useRef()
-    
+
     useEffect(() => { // only first mount
         applyLocale(props.locale, cancelText => setCancelText(cancelText), confirmText => setConfirmText(confirmText))
         createEventMap(props.events)
         setCalendarReady(true)
-    }, [])
+    }, [props.events])
 
     const createEventMap = events => {
         let dateMap = new Map()
@@ -36,7 +36,7 @@ const WeeklyCalendar = props => {
             if (dateMap.has(eventDate)) {
                 let eventArr = dateMap.get(eventDate)
                 eventArr.push(events[i])
-                dateMap.set(eventDate, eventArr) 
+                dateMap.set(eventDate, eventArr)
             } else {
                 dateMap.set(eventDate, [events[i]])
             }
@@ -58,10 +58,10 @@ const WeeklyCalendar = props => {
             let events = map.get(weekdayToAdd.format('YYYY-MM-DD').toString())
             let eventViews = []
             if (events !== undefined) {
-                if(props.renderEvent !== undefined) {
+                if (props.renderEvent !== undefined) {
                     eventViews = events.map((event, j) => {
-                        if(props.renderFirstEvent !== undefined && j === 0) return props.renderFirstEvent(event, j)
-                        else if(props.renderLastEvent !== undefined && j === events.length - 1) return props.renderLastEvent(event, j)
+                        if (props.renderFirstEvent !== undefined && j === 0) return props.renderFirstEvent(event, j)
+                        else if (props.renderLastEvent !== undefined && j === events.length - 1) return props.renderLastEvent(event, j)
                         else return props.renderEvent(event, j)
                     })
                 } else {
@@ -103,7 +103,7 @@ const WeeklyCalendar = props => {
                 else dayView = props.renderDay(eventViews, weekdayToAdd, i)
             } else {
                 dayView = (
-                    <View key={i.toString()} style={styles.day} onLayout= {event => { offsets[i] = event.nativeEvent.layout.y }}>
+                    <View key={i.toString()} style={styles.day} onLayout={event => { offsets[i] = event.nativeEvent.layout.y }}>
                         <View style={styles.dayLabel}>
                             <Text style={[styles.monthDateText, { color: props.themeColor }]}>{weekdayToAdd.format('M/D').toString()}</Text>
                             <Text style={[styles.dayText, { color: props.themeColor }]}>{weekdayToAdd.format(props.weekdayFormat).toString()}</Text>
@@ -123,6 +123,7 @@ const WeeklyCalendar = props => {
     const clickLastWeekHandler = () => {
         setCalendarReady(false)
         const lastWeekCurrDate = currDate.subtract(7, 'days')
+        props.loadEvents(lastWeekCurrDate.startOf('week').format());
         setCurrDate(lastWeekCurrDate.clone())
         setSelectedDate(lastWeekCurrDate.clone().weekday(props.startWeekday - 7))
         createWeekdays(lastWeekCurrDate.clone(), eventMap)
@@ -132,6 +133,7 @@ const WeeklyCalendar = props => {
     const clickNextWeekHandler = () => {
         setCalendarReady(false)
         const nextWeekCurrDate = currDate.add(7, 'days')
+        props.loadEvents(nextWeekCurrDate.startOf('week').format());
         setCurrDate(nextWeekCurrDate.clone())
         setSelectedDate(nextWeekCurrDate.clone().weekday(props.startWeekday - 7))
         createWeekdays(nextWeekCurrDate.clone(), eventMap)
@@ -147,7 +149,7 @@ const WeeklyCalendar = props => {
             setPickerVisible(false)
             setLoading(true)
             if (pickedDate !== undefined) { // when confirm pressed
-                setTimeout( () => {
+                setTimeout(() => {
                     let pickedDateMoment = moment(pickedDate).locale(props.locale)
                     setPickerDate(pickedDateMoment)
                     confirmPickerHandler(pickedDateMoment)
@@ -159,6 +161,9 @@ const WeeklyCalendar = props => {
     }
 
     const confirmPickerHandler = pickedDate => {
+        if (!moment(pickedDate).isSame(currDate, "week")) {
+            props.loadEvents(moment(pickedDate).startOf('week').format())
+        }
         setCurrDate(pickedDate)
         setSelectedDate(pickedDate)
 
@@ -173,6 +178,39 @@ const WeeklyCalendar = props => {
         scrollViewRef.current.scrollTo({ y: dayViewOffsets[i], animated: true })
         setSelectedDate(weekday.clone())
         if (props.onDayPress !== undefined) props.onDayPress(weekday.clone(), i)
+    }
+
+    const onScrollHorziCalendar = (e) => {
+        const scrollEvent = e.nativeEvent;
+        if (Platform.OS === "ios") {
+            if (scrollEvent.contentOffset.x > 0) {
+                clickNextWeekHandler();
+            }
+            else {
+                clickLastWeekHandler();
+            }
+        }
+        else {
+            if (scrollEvent.velocity.x < 0) {
+                clickNextWeekHandler();
+            }
+            else if (scrollEvent.velocity.x > 0) {
+                clickLastWeekHandler();
+            }
+        }
+
+    }
+
+    const onScrollVertiCalendar = (e) => {
+        const scrollEvent = e.nativeEvent;
+        if (Platform.OS === "ios") {
+            if (scrollEvent.velocity.y > 0.5) {
+                clickNextWeekHandler();
+            }
+            else if (scrollEvent.velocity.y < -1) {
+                clickLastWeekHandler();
+            }
+        }
     }
 
     return (
@@ -214,79 +252,81 @@ const WeeklyCalendar = props => {
                 </View>
                 <View style={styles.weekdayNumberContainer}>
                     <TouchableOpacity style={styles.weekDayNumber} onPress={onDayPress.bind(this, weekdays[0], 0)}>
-                        <View style={isCalendarReady && isSelectedDate(weekdays[0]) ? [styles.weekDayNumberCircle, { backgroundColor: props.themeColor }] : { } }>
+                        <View style={isCalendarReady && isSelectedDate(weekdays[0]) ? [styles.weekDayNumberCircle, { backgroundColor: props.themeColor }] : {}}>
                             <Text style={isCalendarReady && isSelectedDate(weekdays[0]) ? styles.weekDayNumberTextToday : { color: props.themeColor }}>
                                 {isCalendarReady ? weekdays[0].date() : ''}
                             </Text>
                         </View>
-                        {isCalendarReady && eventMap.get(weekdays[0].format('YYYY-MM-DD').toString()) !== undefined && 
+                        {isCalendarReady && eventMap.get(weekdays[0].format('YYYY-MM-DD').toString()) !== undefined &&
                             <View style={isSelectedDate(weekdays[0]) ? [styles.dot, { backgroundColor: 'white' }] : [styles.dot, { backgroundColor: props.themeColor }]} />
                         }
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.weekDayNumber} onPress={onDayPress.bind(this, weekdays[1], 1)}>
-                        <View style={isCalendarReady && isSelectedDate(weekdays[1]) ? [styles.weekDayNumberCircle, { backgroundColor: props.themeColor }] : { } }>
+                        <View style={isCalendarReady && isSelectedDate(weekdays[1]) ? [styles.weekDayNumberCircle, { backgroundColor: props.themeColor }] : {}}>
                             <Text style={isCalendarReady && isSelectedDate(weekdays[1]) ? styles.weekDayNumberTextToday : { color: props.themeColor }}>
                                 {isCalendarReady ? weekdays[1].date() : ''}
                             </Text>
                         </View>
-                        {isCalendarReady && eventMap.get(weekdays[1].format('YYYY-MM-DD').toString()) !== undefined && 
+                        {isCalendarReady && eventMap.get(weekdays[1].format('YYYY-MM-DD').toString()) !== undefined &&
                             <View style={isSelectedDate(weekdays[1]) ? [styles.dot, { backgroundColor: 'white' }] : [styles.dot, { backgroundColor: props.themeColor }]} />
                         }
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.weekDayNumber} onPress={onDayPress.bind(this, weekdays[2], 2)}>
-                        <View style={isCalendarReady && isSelectedDate(weekdays[2]) ? [styles.weekDayNumberCircle, { backgroundColor: props.themeColor }] : { } }>
+                        <View style={isCalendarReady && isSelectedDate(weekdays[2]) ? [styles.weekDayNumberCircle, { backgroundColor: props.themeColor }] : {}}>
                             <Text style={isCalendarReady && isSelectedDate(weekdays[2]) ? styles.weekDayNumberTextToday : { color: props.themeColor }}>
                                 {isCalendarReady ? weekdays[2].date() : ''}
                             </Text>
                         </View>
-                        {isCalendarReady && eventMap.get(weekdays[2].format('YYYY-MM-DD').toString()) !== undefined && 
+                        {isCalendarReady && eventMap.get(weekdays[2].format('YYYY-MM-DD').toString()) !== undefined &&
                             <View style={isSelectedDate(weekdays[2]) ? [styles.dot, { backgroundColor: 'white' }] : [styles.dot, { backgroundColor: props.themeColor }]} />
                         }
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.weekDayNumber} onPress={onDayPress.bind(this, weekdays[3], 3)}>
-                        <View style={isCalendarReady && isSelectedDate(weekdays[3]) ? [styles.weekDayNumberCircle, { backgroundColor: props.themeColor }] : { } }>
+                        <View style={isCalendarReady && isSelectedDate(weekdays[3]) ? [styles.weekDayNumberCircle, { backgroundColor: props.themeColor }] : {}}>
                             <Text style={isCalendarReady && isSelectedDate(weekdays[3]) ? styles.weekDayNumberTextToday : { color: props.themeColor }}>
                                 {isCalendarReady ? weekdays[3].date() : ''}
                             </Text>
                         </View>
-                        {isCalendarReady && eventMap.get(weekdays[3].format('YYYY-MM-DD').toString()) !== undefined && 
+                        {isCalendarReady && eventMap.get(weekdays[3].format('YYYY-MM-DD').toString()) !== undefined &&
                             <View style={isSelectedDate(weekdays[3]) ? [styles.dot, { backgroundColor: 'white' }] : [styles.dot, { backgroundColor: props.themeColor }]} />
                         }
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.weekDayNumber} onPress={onDayPress.bind(this, weekdays[4], 4)}>
-                        <View style={isCalendarReady && isSelectedDate(weekdays[4]) ? [styles.weekDayNumberCircle, { backgroundColor: props.themeColor }] : { } }>
+                        <View style={isCalendarReady && isSelectedDate(weekdays[4]) ? [styles.weekDayNumberCircle, { backgroundColor: props.themeColor }] : {}}>
                             <Text style={isCalendarReady && isSelectedDate(weekdays[4]) ? styles.weekDayNumberTextToday : { color: props.themeColor }}>
                                 {isCalendarReady ? weekdays[4].date() : ''}
                             </Text>
                         </View>
-                        {isCalendarReady && eventMap.get(weekdays[4].format('YYYY-MM-DD').toString()) !== undefined && 
+                        {isCalendarReady && eventMap.get(weekdays[4].format('YYYY-MM-DD').toString()) !== undefined &&
                             <View style={isSelectedDate(weekdays[4]) ? [styles.dot, { backgroundColor: 'white' }] : [styles.dot, { backgroundColor: props.themeColor }]} />
                         }
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.weekDayNumber} onPress={onDayPress.bind(this, weekdays[5], 5)}>
-                        <View style={isCalendarReady && isSelectedDate(weekdays[5]) ? [styles.weekDayNumberCircle, { backgroundColor: props.themeColor }] : { } }>
+                        <View style={isCalendarReady && isSelectedDate(weekdays[5]) ? [styles.weekDayNumberCircle, { backgroundColor: props.themeColor }] : {}}>
                             <Text style={isCalendarReady && isSelectedDate(weekdays[5]) ? styles.weekDayNumberTextToday : { color: props.themeColor }}>
                                 {isCalendarReady ? weekdays[5].date() : ''}
                             </Text>
                         </View>
-                        {isCalendarReady && eventMap.get(weekdays[5].format('YYYY-MM-DD').toString()) !== undefined && 
+                        {isCalendarReady && eventMap.get(weekdays[5].format('YYYY-MM-DD').toString()) !== undefined &&
                             <View style={isSelectedDate(weekdays[5]) ? [styles.dot, { backgroundColor: 'white' }] : [styles.dot, { backgroundColor: props.themeColor }]} />
                         }
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.weekDayNumber} onPress={onDayPress.bind(this, weekdays[6], 6)}>
-                        <View style={isCalendarReady && isSelectedDate(weekdays[6]) ? [styles.weekDayNumberCircle, { backgroundColor: props.themeColor }] : { } }>
+                        <View style={isCalendarReady && isSelectedDate(weekdays[6]) ? [styles.weekDayNumberCircle, { backgroundColor: props.themeColor }] : {}}>
                             <Text style={isCalendarReady && isSelectedDate(weekdays[6]) ? styles.weekDayNumberTextToday : { color: props.themeColor }}>
                                 {isCalendarReady ? weekdays[6].date() : ''}
                             </Text>
                         </View>
-                        {isCalendarReady && eventMap.get(weekdays[6].format('YYYY-MM-DD').toString()) !== undefined && 
+                        {isCalendarReady && eventMap.get(weekdays[6].format('YYYY-MM-DD').toString()) !== undefined &&
                             <View style={isSelectedDate(weekdays[6]) ? [styles.dot, { backgroundColor: 'white' }] : [styles.dot, { backgroundColor: props.themeColor }]} />
                         }
                     </TouchableOpacity>
                 </View>
             </View>
-            <ScrollView ref={scrollViewRef} style={styles.schedule}>
-                {(scheduleView !== undefined) && scheduleView}
+            <ScrollView horizontal={true} pagingEnabled={true} decelerationRate="normal" onScrollEndDrag={(e) => onScrollHorziCalendar(e)} style={{ width: Dimensions.get('window').width }}>
+                <ScrollView onScrollEndDrag={(e) => onScrollVertiCalendar(e)} ref={scrollViewRef} style={{ width: Dimensions.get('window').width }}>
+                    {(scheduleView !== undefined) && scheduleView}
+                </ScrollView>
             </ScrollView>
             {Platform.OS === 'ios' && <Modal
                 transparent={true}
@@ -312,13 +352,13 @@ const WeeklyCalendar = props => {
                     onChange={pickerOnChange}
                     style={styles.picker}
                 />
-            </Modal> }
+            </Modal>}
             {Platform.OS === 'android' && isPickerVisible && <DateTimePicker
                 locale={props.locale}
                 value={pickerDate.toDate()}
                 display='spinner'
                 onChange={pickerOnChange}
-            /> }
+            />}
             {(!isCalendarReady || isLoading) && <ActivityIndicator size='large' color='grey' style={styles.indicator} />}
         </View>
     )
